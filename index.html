@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>meeting-live-translate</title>
+<style>
+  :root {
+    --void: #0a0c10;
+    --panel: rgba(255, 255, 255, 0.04);
+    --panel-border: rgba(255, 255, 255, 0.08);
+    --phosphor: #4ade80;
+    --phosphor-dim: rgba(74, 222, 128, 0.35);
+    --amber: #f4a100;
+    --text: #e8eaed;
+    --text-muted: #6b7280;
+    --mono: ui-monospace, "SF Mono", "Menlo", "Consolas", monospace;
+    --sans: -apple-system, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background:
+      radial-gradient(circle at 20% -10%, rgba(74, 222, 128, 0.06), transparent 45%),
+      radial-gradient(circle at 90% 10%, rgba(244, 161, 0, 0.05), transparent 40%),
+      var(--void);
+    color: var(--text);
+    font-family: var(--sans);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 32px 20px 60px;
+  }
+
+  header {
+    width: 100%;
+    max-width: 720px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 28px;
+  }
+
+  .title-block h1 {
+    font-family: var(--mono);
+    font-size: 17px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    margin: 0;
+    color: var(--text);
+  }
+
+  .title-block p {
+    margin: 4px 0 0;
+    font-size: 12.5px;
+    color: var(--text-muted);
+  }
+
+  /* Signature element: a live waveform that pulses while listening,
+     goes still + amber if the connection drops. This is the one
+     place the design spends its "boldness" — everything else stays quiet. */
+  .status {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: var(--mono);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+  }
+
+  .wave {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    height: 18px;
+  }
+
+  .wave span {
+    width: 3px;
+    border-radius: 2px;
+    background: var(--phosphor-dim);
+    animation: bounce 1.1s ease-in-out infinite;
+  }
+
+  .wave span:nth-child(1) { height: 6px;  animation-delay: 0s; }
+  .wave span:nth-child(2) { height: 14px; animation-delay: 0.12s; }
+  .wave span:nth-child(3) { height: 9px;  animation-delay: 0.24s; }
+  .wave span:nth-child(4) { height: 16px; animation-delay: 0.36s; }
+  .wave span:nth-child(5) { height: 7px;  animation-delay: 0.48s; }
+
+  body.live .wave span { background: var(--phosphor); }
+  body.down .wave span { animation-play-state: paused; background: var(--amber); height: 3px !important; }
+
+  @keyframes bounce {
+    0%, 100% { transform: scaleY(0.4); opacity: 0.6; }
+    50%      { transform: scaleY(1);   opacity: 1; }
+  }
+
+  main {
+    width: 100%;
+    max-width: 720px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .empty-state {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--text-muted);
+    border: 1px dashed var(--panel-border);
+    border-radius: 10px;
+    padding: 28px;
+    text-align: center;
+    line-height: 1.6;
+  }
+
+  .caption {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 12px;
+    padding: 14px 16px;
+    backdrop-filter: blur(10px);
+    animation: rise 0.35s ease-out;
+  }
+
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .caption .zh {
+    font-family: var(--mono);
+    font-size: 15px;
+    color: var(--phosphor);
+    margin-bottom: 6px;
+  }
+
+  .caption .en {
+    font-size: 14.5px;
+    color: var(--text);
+    line-height: 1.45;
+  }
+
+  .caption .lang-tag {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-right: 8px;
+  }
+
+  .caption.error {
+    border-color: rgba(244, 161, 0, 0.35);
+  }
+
+  .caption.error .en {
+    color: var(--amber);
+    font-family: var(--mono);
+    font-size: 12.5px;
+  }
+</style>
+</head>
+<body>
+
+  <header>
+    <div class="title-block">
+      <h1>meeting-live-translate</h1>
+      <p>zh → {{ target_language|lower }}, streaming locally, nothing leaves this machine</p>
+    </div>
+    <div class="status">
+      <div class="wave">
+        <span></span><span></span><span></span><span></span><span></span>
+      </div>
+      <span id="status-text">connecting</span>
+    </div>
+  </header>
+
+  <main id="feed">
+    <div class="empty-state" id="empty-state">
+      Waiting for the first line of speech.<br>Say something in Mandarin to test it.
+    </div>
+  </main>
+
+  <script>
+    const feed = document.getElementById("feed");
+    const emptyState = document.getElementById("empty-state");
+    const statusText = document.getElementById("status-text");
+    const body = document.body;
+
+    const source = new EventSource("/events");
+
+    source.onopen = () => {
+      body.classList.remove("down");
+    };
+
+    source.onerror = () => {
+      body.classList.remove("live");
+      body.classList.add("down");
+      statusText.textContent = "reconnecting";
+    };
+
+    source.onmessage = (raw) => {
+      const event = JSON.parse(raw.data);
+
+      if (event.type === "status") {
+        body.classList.add("live");
+        body.classList.remove("down");
+        statusText.textContent = "listening";
+        return;
+      }
+
+      if (emptyState) emptyState.remove();
+
+      const card = document.createElement("div");
+
+      if (event.type === "caption") {
+        card.className = "caption";
+        card.innerHTML = `
+          <div class="zh">${escapeHtml(event.zh)}</div>
+          <div class="en"><span class="lang-tag">{{ target_language[:2]|upper }}</span>${escapeHtml(event.en)}</div>
+        `;
+      } else if (event.type === "error") {
+        card.className = "caption error";
+        card.innerHTML = `<div class="en">⚠ ${escapeHtml(event.message)}</div>`;
+      }
+
+      feed.appendChild(card);
+      window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+    };
+
+    function escapeHtml(str) {
+      const div = document.createElement("div");
+      div.textContent = str;
+      return div.innerHTML;
+    }
+  </script>
+
+</body>
+</html>
